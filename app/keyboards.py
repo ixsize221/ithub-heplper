@@ -5,7 +5,7 @@ async def main_kb():
     keyboard =  kb_markup(inline_keyboard=[[
         kb_button(text="Ответы на популярные вопросы📰", callback_data="quests"),
     ],[
-        kb_button(text= "Отправить анонимный вопрос Ректору🏫", callback_data= "anon")
+        kb_button(text= "Отправить анонимный вопрос Директору🏫", callback_data= "anon")
     ]])
     return keyboard
 

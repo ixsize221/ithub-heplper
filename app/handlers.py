@@ -11,12 +11,21 @@ from aiogram.fsm.context import FSMContext
 import json
 import os
 from datetime import datetime
-
-router = Router()
-
+from app.quest_ai import gpt_key
+import logging
 import sqlite3
 import os
 from collections import Counter
+router = Router()
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler("IThub_Helper.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
 
 def init_db():
     db_path = 'university_bot.db'
@@ -188,6 +197,8 @@ rektor_id = 7844311755
 
 questions = {}
 
+pending_questions = {}
+
 @router.message(CommandStart())
 async def start_bot(message: types.Message):
     await message.answer(
@@ -200,16 +211,49 @@ async def step_ai(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text('впиши свой вопрос нейросети\nНапример: Какие документы нужны для поступления в ДГТУ?')
     await state.set_state(GPTForm.text)
 
+def add_or_update_gpt_question(question: str, answer: str = None):
+    conn = sqlite3.connect('university_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT ask_count, is_common FROM questions WHERE question_text = ?', (question,))
+    row = cursor.fetchone()
+    if row:
+        ask_count, is_common = row
+        ask_count += 1
+        cursor.execute('UPDATE questions SET ask_count = ? WHERE question_text = ?', (ask_count, question))
+        if ask_count == 5 and not is_common:
+            cursor.execute('UPDATE questions SET is_common = TRUE WHERE question_text = ?', (question,))
+    else:
+        # Вопроса нет в базе — считаем обращения в памяти
+        global pending_questions
+        if question in pending_questions:
+            pending_questions[question]["count"] += 1
+        else:
+            pending_questions[question] = {"count": 1, "answer": answer}
+        if pending_questions[question]["count"] == 5:
+            cursor.execute('INSERT INTO questions (question_text, answer_text, ask_count, is_common, category) VALUES (?, ?, 5, TRUE, ?)', (question, pending_questions[question]["answer"], analyze_question(question)))
+            del pending_questions[question]
+    conn.commit()
+    conn.close()
+
 @router.message(F.text, GPTForm.text)
 async def main_GPT(message: types.Message, state: FSMContext):
+    user = message.from_user
     status = await message.answer('Генерация ответа...')
     text = await quest_ai.ask_gpt(prompt=message.text)
-    
-    # Добавляем вопрос и ответ в базу данных
-    add_question_to_db(message.text, text)
-    
-    await status.edit_text(f'{text}')
+    formatted = (
+        f"<b>🤖 Ответ нейросети:</b>\n"
+        f"<b>──────────────</b>\n"
+        f"<b>Ваш вопрос:</b> <i>{message.text}</i>\n"
+        f"<b>──────────────</b>\n"
+        f"<blockquote>{text}</blockquote>"
+        f"\n<b>──────────────</b>"
+    )
+    await status.edit_text(formatted, reply_markup=gpt_key, parse_mode='HTML')
     await state.clear()
+    # Логирование
+    logging.info(f"[GPT] user_id={user.id} username={user.username} question={message.text} answer={text}")
+    # Учет вопроса к нейросети
+    add_or_update_gpt_question(message.text, text)
 
 @router.callback_query(F.data == "quests")
 async def main_cmd(call: CallbackQuery):
@@ -266,6 +310,14 @@ async def show_category_questions(callback: CallbackQuery):
         reply_markup=questions_markup
     )
 
+@router.callback_query(F.data == 'back')
+async def back_to_main_menu(call: CallbackQuery):
+    await call.message.edit_text(
+        "👋 Привет! Я — бот, который с радостью поможет тебе найти ответ на любой интересующий вопрос 😊\n\n"\
+        "👇 Просто выбери одну из кнопок ниже, и мы начнём наше общение!", 
+        reply_markup=await kb.main_kb()
+    )
+    
 @router.callback_query(F.data == 'back_to_main')
 async def back_to_main_menu(call: CallbackQuery):
     await call.message.edit_text(
@@ -273,6 +325,7 @@ async def back_to_main_menu(call: CallbackQuery):
         "👇 Просто выбери одну из кнопок ниже, и мы начнём наше общение!", 
         reply_markup=await kb.main_kb()
     )
+    
 
 @router.callback_query(F.data == 'anon')
 async def text_anon(callback: CallbackQuery, state: FSMContext):
@@ -283,15 +336,11 @@ async def text_anon(callback: CallbackQuery, state: FSMContext):
 async def receive_question(message: types.Message, state: FSMContext):
     question = message.text
     user_id = message.from_user.id
-    
-    add_question_to_db(question)
-    
     await message.bot.send_message(
         chat_id=rektor_id,
         text=f"📩 Анонимный вопрос от студента:\n\n{question}",
         reply_markup=await kb.answer_quest(user_id)
     )
-    
     await message.answer('✅ Ваш вопрос был отправлен ректору. Спасибо! ')
     await state.clear()
 
@@ -316,7 +365,3 @@ async def receive_answer(message: types.Message, state: FSMContext):
     await message.answer("✅ Ответ успешно отправлен пользователю!")
     await state.clear()
 
-    
-    
-
-    

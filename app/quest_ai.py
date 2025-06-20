@@ -7,6 +7,8 @@ import os
 from typing import List, Dict
 from datetime import datetime
 from collections import Counter
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 
 # Константы для работы с сайтом
 ITHUB_URL = "https://rostov.ithub.ru/"
@@ -73,13 +75,13 @@ def sync_gpt_request(prompt: str, context: Dict[str, str], model: str = 'gpt-4')
 
         Правила ответов:
         1. Отвечайте ТОЛЬКО на основе предоставленной информации
-        2. Если информации нет в контексте, скажите "я нихуя незнаю, съеби нахуй черт."
+        2. Если информации нет в контексте, скажите сообщи в вежливой форме
         3. Отвечайте кратко и по существу
-        4. Если вопрос не связан с колледжем, обматери жестко  человека и сообщите об этом в грубой форме обязательно с матами
+        4. Если вопрос не связан с колледжем, скажи что не владееш данной информацией
         5. Адрес главного корпусв : Ростов-на-Дону, пл. Гагарина, д. 1
         """
         
-
+    
         response = g4f.ChatCompletion.create(
             model=model,
             messages=[
@@ -90,12 +92,17 @@ def sync_gpt_request(prompt: str, context: Dict[str, str], model: str = 'gpt-4')
         return response
     except Exception as e:
         return f"Ошибка: {str(e)}"
+        
 
 async def ask_gpt(prompt: str, model: str = 'gpt-4') -> str:
 
     context = await fetch_ithub_content()
     
     return await asyncio.to_thread(sync_gpt_request, prompt, context, model)
+
+gpt_key = InlineKeyboardMarkup(inline_keyboard=[[
+    InlineKeyboardButton(text='Назад', callback_data='back')
+]])
 
 
 
